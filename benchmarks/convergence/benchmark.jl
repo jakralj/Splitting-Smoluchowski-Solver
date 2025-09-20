@@ -7,7 +7,7 @@ using LinearAlgebra, Statistics, DataFrames, DelimitedFiles, Printf, CSV    # Da
 #  Integral helpers (mid-point rule on the uniform mesh)
 # ------------------------------------------------------------------
 include("../methods.jl")      # solvers
-include("../potentials.jl")   # potentials
+include("../../utils/Potentials/potentials.jl")   # potentials
 
 # ------------------------------------------------------------
 #  Helper integrals
