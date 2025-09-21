@@ -2,6 +2,10 @@ using LinearAlgebra
 using SparseArrays
 using Plots
 using DelimitedFiles
+using Distributed
+using CSV
+using DataFrames
+
 include("../../methods.jl")
 const D = 0.01
 const kbT = 0.65
@@ -522,175 +526,61 @@ end
 const mms1 = ManufacturedSolution(generate_potential_1, manufactured_solution_1, manufactured_solution_1_dt, compute_source_term_1)
 const mms2 = ManufacturedSolution(generate_potential_2, manufactured_solution_2, manufactured_solution_2_dt, compute_source_term_2)
 
-function run_mms_verification(mms, dx_values, dt_values)
-    results = []
+function run_mms_verification_ultra_parallel(mms, dx_values, dt_values, output_file="mms_results.csv")
+    # Pre-compute all potential fields to avoid redundant calculations
+    potential_cache = Dict()
     for dx in dx_values
         nx = Int(2 / dx)
-        μ, ∇μX, ∇μY, ∇2μX, ∇2μY = mms.potential(nx)
-        t_final = 1
-
-        for dt in dt_values
-            num_steps = round(Int, t_final / dt)
-            actual_final_time = dt * num_steps
-
-            # Initial condition
-            u0 = mms.solution(0.0, nx)
-
-            # Exact solution at final time
-            u_exact = mms.solution(actual_final_time, nx)
-     
-            source_func(t) = mms.source(t, nx, μ, ∇μX, ∇μY, ∇2μX, ∇2μY)
-     
-            # Test Lie splitting
-            u_lie = lie_splitting_with_source(dt, dx, u0, num_steps, μ, ∇μX, ∇μY, ∇2μX, ∇2μY, source_func)
-            error_lie = l2_error(u_lie, u_exact, dx) 
-            push!(results, ("lie", dx, dt, error_lie))
-     
-            # Test Strang splitting
-            u_strang = strang_splitting_with_source(dt, dx, u0, num_steps, μ, ∇μX, ∇μY, ∇2μX, ∇2μY, source_func)
-            error_strang = l2_error(u_strang, u_exact, dx) 
-            push!(results, ("strang", dx, dt, error_strang))
-     
-            # Test ADI scheme with direct integration
-            u_adi_direct = adi_scheme_direct_source(dt, dx, u0, num_steps, μ, ∇μX, ∇μY, ∇2μX, ∇2μY, source_func)
-            error_adi_direct = l2_error(u_adi_direct, u_exact, dx)
-            push!(results, ("adi", dx, dt, error_adi_direct))
-
-            println("dt = $dt and dx = $dx:")
-            println("  Lie error = $error_lie")
-            println("  Strang error = $error_strang")
-            println("  ADI direct error = $error_adi_direct")
-            println("  Mass conservation check:")
-            println("    ADI direct: $(sum(u_adi_direct))")
-        end
+        potential_cache[dx] = (nx, mms.potential(nx)...)
     end
-    return results 
-end
-"""
-Run MMS verification for potential 1
-"""
-function run_mms_verification_1_direct(nx, dx)
-    println("=== MMS Verification for Potential 1 ===")
-
-    # Generate potential data
-
-    μ, ∇μX, ∇μY, ∇2μX, ∇2μY = generate_potential_1(nx)
-
-    # Time parameters
-    t_final = 10.0
-    dt_values = [1, 0.5, 0.25, 0.1, 0.05, 0.025, 0.0125, 0.00625, 0.003125]
-
-    errors_lie = Float64[]
-    errors_strang = Float64[]
-    errors_adi_split = Float64[]
-    errors_adi_direct = Float64[]
-
-    for dt in dt_values
-        num_steps = round(Int, t_final / dt)
-        actual_final_time = dt * num_steps
-
-        # Initial condition
-        u0 = manufactured_solution_1(0.0, nx)
-
-        # Exact solution at final time
-        u_exact = manufactured_solution_1(actual_final_time, nx)
-
-        source_func(t) = compute_source_term_1(t, nx, μ, ∇μX, ∇μY, ∇2μX, ∇2μY)
-
-        # Test Lie splitting
-        u_lie = lie_splitting_with_source(dt, dx, u0, num_steps, μ, ∇μX, ∇μY, ∇2μX, ∇2μY, source_func)
-        error_lie = norm(u_lie - u_exact, 2) * dx
-        push!(errors_lie, error_lie)
-
-        # Test Strang splitting
-        u_strang = strang_splitting_with_source(dt, dx, u0, num_steps, μ, ∇μX, ∇μY, ∇2μX, ∇2μY, source_func)
-        error_strang = norm(u_strang - u_exact, 2) * dx
-        push!(errors_strang, error_strang)
-
-        # Test ADI scheme with direct integration
-        u_adi_direct = adi_scheme_direct_source(dt, dx, u0, num_steps, μ, ∇μX, ∇μY, ∇2μX, ∇2μY, source_func)
-        error_adi_direct = norm(u_adi_direct - u_exact, 2) * dx
-        push!(errors_adi_direct, error_adi_direct)
-
-        println("dt = $dt:")
-        println("  Lie error = $error_lie")
-        println("  Strang error = $error_strang")
-        println("  ADI direct error = $error_adi_direct")
-        println("  Mass conservation check:")
-        println("    ADI direct: $(sum(u_adi_direct))")
+    
+    # Create all method-parameter combinations
+    methods = ["lie", "strang", "adi"]
+    all_tasks = [(method, dx, dt) for method in methods 
+                                   for dx in dx_values 
+                                   for dt in dt_values]
+    
+    # Parallel computation - each method/parameter combination is a separate task
+    results = pmap(all_tasks) do (method, dx, dt)
+        compute_single_method_error(mms, method, dx, dt, potential_cache[dx])
     end
-
-    # Plot convergence
-    p1 = plot(dt_values, [errors_lie errors_strang errors_adi_direct],
-              xlabel="Time step", ylabel="L2 Error",
-              label=["Lie" "Strang" "ADI Direct"],
-              xscale=:log10, yscale=:log10,
-              markershape=[:circle :x :hexagon], linestyles = [:solid :solid :solid], title="MMS Convergence - Potential 1", legend=:outertopright)
-
-    return p1, errors_lie, errors_strang, errors_adi_direct
+    
+    # Convert to DataFrame and save
+    df = DataFrame(
+        method = [r[1] for r in results],
+        dx = [r[2] for r in results],
+        dt = [r[3] for r in results],
+        error = [r[4] for r in results]
+    )
+    
+    CSV.write(output_file, df, delim='\t')
+    
+    return results
 end
 
-"""
-Run MMS verification for potential 2 - comparing direct integration vs splitting
-"""
-function run_mms_verification_2_direct(nx, dx)
-    println("=== MMS Verification for Potential 2 - Direct ADI vs Splitting ===")
-
-    # Generate potential data
-    μ, ∇μX, ∇μY, ∇2μX, ∇2μY = generate_potential_2(nx)
-
-    # Time parameters
-    t_final = 1
-    dt_values = 2 .^(-1.0 .*(-3:8)) 
-
-    errors_lie = Float64[]
-    errors_strang = Float64[]
-    errors_adi_split = Float64[]
-    errors_adi_direct = Float64[]
-
-    for dt in dt_values
-        num_steps = round(Int, t_final / dt)
-        actual_final_time = dt * num_steps
-
-        # Initial condition
-        u0 = manufactured_solution_2(0.0, nx)
-
-        source_func(t) = compute_source_term_2(t, nx, μ, ∇μX, ∇μY, ∇2μX, ∇2μY)
-        # Exact solution at final time
-        u_exact = manufactured_solution_2(actual_final_time, nx)
-
-        # Test Lie splitting
-        u_lie = lie_splitting_with_source(dt, dx, u0, num_steps, μ, ∇μX, ∇μY, ∇2μX, ∇2μY, source_func)
-        error_lie = norm(u_lie - u_exact, 2) * dx
-        push!(errors_lie, error_lie)
-
-        # Test Strang splitting
-        u_strang = strang_splitting_with_source(dt, dx, u0, num_steps, μ, ∇μX, ∇μY, ∇2μX, ∇2μY, source_func)
-        error_strang = norm(u_strang - u_exact, 2) * dx
-        push!(errors_strang, error_strang)
-
-        # Test ADI scheme with direct integration
-        u_adi_direct = adi_scheme_direct_source(dt, dx, u0, num_steps, μ, ∇μX, ∇μY, ∇2μX, ∇2μY, source_func)
-        error_adi_direct = norm(u_adi_direct - u_exact, 2) * dx
-        push!(errors_adi_direct, error_adi_direct)
-
-        println("dt = $dt:")
-        println("  Lie error = $error_lie")
-        println("  Strang error = $error_strang")
-        println("  ADI direct error = $error_adi_direct")
-        println("  Mass conservation check:")
-        println("    ADI direct: $(sum(u_adi_direct))")
+function compute_single_method_error(mms, method, dx, dt, cached_potential)
+    nx, μ, ∇μX, ∇μY, ∇2μX, ∇2μY = cached_potential
+    t_final = 1.0
+    num_steps = round(Int, t_final / dt)
+    actual_final_time = dt * num_steps
+    
+    # Initial condition and exact solution
+    u0 = mms.solution(0.0, nx)
+    u_exact = mms.solution(actual_final_time, nx)
+    source_func(t) = mms.source(t, nx, μ, ∇μX, ∇μY, ∇2μX, ∇2μY)
+    
+    # Run the specific method
+    if method == "lie"
+        u_computed = lie_splitting_with_source(dt, dx, u0, num_steps, μ, ∇μX, ∇μY, ∇2μX, ∇2μY, source_func)
+    elseif method == "strang"
+        u_computed = strang_splitting_with_source(dt, dx, u0, num_steps, μ, ∇μX, ∇μY, ∇2μX, ∇2μY, source_func)
+    elseif method == "adi"
+        u_computed = adi_scheme_direct_source(dt, dx, u0, num_steps, μ, ∇μX, ∇μY, ∇2μX, ∇2μY, source_func)
     end
-
-    # Plot convergence
-    p1 = plot(dt_values, [errors_lie errors_strang errors_adi_direct],
-              xlabel="Time step", ylabel="L2 Error",
-              label=["Lie" "Strang" "ADI Direct"],
-              xscale=:log10, yscale=:log10,
-              markershape=[:circle :x :hexagon], linestyles = [:solid :solid :solid], title="MMS Convergence - Potential 2", legend=:outertopright)
-
-    return p1, errors_lie, errors_strang, errors_adi_direct
+    
+    error = l2_error(u_computed, u_exact, dx)
+    return (method, dx, dt, error)
 end
 
-dt_values = 2 .^(-1.0 .*(8:16)) 
+dt_values = 2 .^(-1.0 .*(6:16)) 
 dx_values = 2 .^(-1.0 .*(3:8))
