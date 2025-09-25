@@ -1,6 +1,5 @@
 using LinearAlgebra
 using SparseArrays
-using Plots
 using DelimitedFiles
 using Distributed
 using CSV
