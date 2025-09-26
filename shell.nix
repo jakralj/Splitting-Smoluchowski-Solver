@@ -15,5 +15,6 @@ pkgs.mkShell {
       export LD_LIBRARY_PATH=${pkgs.linuxPackages.nvidia_x11}/lib:${pkgs.ncurses5}/lib
       export EXTRA_LDFLAGS="-L/lib -L${pkgs.linuxPackages.nvidia_x11}/lib"
       export EXTRA_CCFLAGS="-I/usr/include"
+      export GIT_SSH_COMMAND="ssh -i ~/.ssh/id_ed25519_kralj_co -o IdentitiesOnly=yes"
    '';          
 }

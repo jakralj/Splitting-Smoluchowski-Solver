@@ -1,29 +1,19 @@
 using LinearAlgebra
 
-"""
-Helper function to shift an array with zero boundary conditions
-Uses in-place operations to avoid allocations
-"""
+# Helper function to shift an array with zero boundary conditions
 function shift!(output, u, s)
     if s > 0
-        # Shift right: move elements from end to beginning
         copyto!(output, s+1, u, 1, length(u)-s)
         fill!(view(output, 1:s), zero(eltype(output)))
     elseif s < 0
-        # Shift left: move elements from beginning to end
         copyto!(output, 1, u, -s+1, length(u)+s)
         fill!(view(output, length(u)+s+1:length(u)), zero(eltype(output)))
     else
-        # No shift
         copyto!(output, u)
     end
     return output
 end
 
-"""
-Crank-Nicolson solver for 1D Smoluchowski equation
-Reuses pre-allocated temporary arrays
-"""
 function CrankNicolson1D!(u_out, u, μ, ∇μ, ∇2μ, D, dx, dt, kbT, temp_arrays)
     α = D / (4*dx*kbT)
     β = D / (2*dx^2)
@@ -41,10 +31,8 @@ function CrankNicolson1D!(u_out, u, μ, ∇μ, ∇2μ, D, dx, dt, kbT, temp_arra
     shift!(uP, u, 1)
     shift!(uN, u, -1)
     
-    # Vectorized computation of B
     @. B = -1 * (uP*(-∇μ*α + β) + u*(∇2μ*γ - ϵ + 1/dt) + uN*(∇μ*α + β))
     
-    # Fill diagonal arrays in-place
     @inbounds for i in 2:length(∇μ)
         Adl[i-1] = -∇μ[i]*α + β
     end
@@ -59,7 +47,6 @@ function CrankNicolson1D!(u_out, u, μ, ∇μ, ∇2μ, D, dx, dt, kbT, temp_arra
     B[1] = -1*(uN[1]*2*β + u[1]*(∇2μ[1]*γ - ϵ + 1/dt))
     B[end] = -1*(uP[end]*2*β + u[end]*(∇2μ[end]*γ - ϵ + 1/dt))
     
-    # Reuse existing tridiagonal matrix if possible
     temp_arrays.A.dl .= Adl
     temp_arrays.A.d .= Au  
     temp_arrays.A.du .= Adu
@@ -68,9 +55,6 @@ function CrankNicolson1D!(u_out, u, μ, ∇μ, ∇2μ, D, dx, dt, kbT, temp_arra
     return u_out
 end
 
-"""
-Temporary arrays structure to avoid allocations
-"""
 struct TempArrays1D{T}
     uP::Vector{T}
     uN::Vector{T}
@@ -92,9 +76,7 @@ function TempArrays1D(::Type{T}, n::Int) where T
     return TempArrays1D(uP, uN, B, Adl, Adu, Au, A)
 end
 
-"""
-2D temporary arrays structure
-"""
+# 2D temporary arrays structure
 struct TempArrays2D{T}
     temp_1d_x::Vector{TempArrays1D{T}}  # One for each row
     temp_1d_y::Vector{TempArrays1D{T}}  # One for each column
@@ -112,16 +94,11 @@ function TempArrays2D(::Type{T}, nx::Int, ny::Int) where T
     return TempArrays2D(temp_1d_x, temp_1d_y, u_temp_x, u_temp_y, u_half)
 end
 
-"""
-Operator for evolution in X direction - optimized version
-"""
 function evolve_x!(u_new, u_2d, μ, ∇μX, ∇2μX, D, dx, dt, kbT, temp_arrays)
     nx = size(u_2d, 1)
     @inbounds for i in 1:nx
-        # Extract row into temporary vector
         copyto!(temp_arrays.u_temp_x, view(u_2d, i, :))
         
-        # Solve 1D problem in-place
         CrankNicolson1D!(view(u_new, i, :), temp_arrays.u_temp_x, 
                         view(μ, i, :), view(∇μX, i, :), view(∇2μX, i, :),
                         D, dx, dt, kbT, temp_arrays.temp_1d_x[i])
@@ -129,16 +106,11 @@ function evolve_x!(u_new, u_2d, μ, ∇μX, ∇2μX, D, dx, dt, kbT, temp_arrays
     return u_new
 end
 
-"""
-Operator for evolution in Y direction - optimized version
-"""
 function evolve_y!(u_new, u_2d, μ, ∇μY, ∇2μY, D, dx, dt, kbT, temp_arrays)
     ny = size(u_2d, 2)
     @inbounds for j in 1:ny
-        # Extract column into temporary vector
         copyto!(temp_arrays.u_temp_y, view(u_2d, :, j))
         
-        # Solve 1D problem in-place
         CrankNicolson1D!(view(u_new, :, j), temp_arrays.u_temp_y,
                         view(μ, :, j), view(∇μY, :, j), view(∇2μY, :, j),
                         D, dx, dt, kbT, temp_arrays.temp_1d_y[j])
@@ -146,9 +118,6 @@ function evolve_y!(u_new, u_2d, μ, ∇μY, ∇2μY, D, dx, dt, kbT, temp_arrays
     return u_new
 end
 
-"""
-Lie Splitting (First Order) - optimized version
-"""
 function lie_splitting!(u, dt::Float64, dx, num_steps, μ, ∇μX, ∇μY, ∇2μX, ∇2μY, D, kbT, temp_arrays)
     u_temp = temp_arrays.u_half  # Reuse the allocated matrix
     
@@ -159,25 +128,18 @@ function lie_splitting!(u, dt::Float64, dx, num_steps, μ, ∇μX, ∇μY, ∇2�
     return u
 end
 
-"""
-Strang Splitting (Second Order) - optimized version
-"""
 function strang_splitting!(u, dt::Float64, dx, num_steps, μ, ∇μX, ∇μY, ∇2μX, ∇2μY, D, kbT, temp_arrays)
-    u_temp = temp_arrays.u_half  # Reuse the allocated matrix
+    u_temp = temp_arrays.u_half 
     
     for step in 1:num_steps
         evolve_x!(u_temp, u, μ, ∇μX, ∇2μX, D, dx, dt/2, kbT, temp_arrays)
         evolve_y!(u, u_temp, μ, ∇μY, ∇2μY, D, dx, dt, kbT, temp_arrays)
         evolve_x!(u_temp, u, μ, ∇μX, ∇2μX, D, dx, dt/2, kbT, temp_arrays)
-        # Copy result back to u
         copyto!(u, u_temp)
     end
     return u
 end
 
-"""
-ADI scheme - optimized version with pre-allocated matrices
-"""
 struct ADITempArrays{T}
     u_half::Matrix{T}
     Adl::Vector{T}
@@ -196,9 +158,6 @@ function ADITempArrays(::Type{T}, nx::Int, ny::Int) where T
     return ADITempArrays(u_half, Adl, Adu, Au, B)
 end
 
-"""
-ADI x-direction sweep - optimized
-"""
 function x_direction_sweep!(u_half, u, αx, αy, βx, βy, dt, ∇μX, ∇μY, ∇2μX, ∇2μY, D, kbT, temp_arrays)
     nx, ny = size(u)
     
@@ -275,15 +234,11 @@ function x_direction_sweep!(u_half, u, αx, αy, βx, βy, dt, ∇μX, ∇μY, �
             end
         end
         
-        # Solve and store result
         ldiv!(view(u_half, i, :), Tridiagonal(Adl_view, Au_view, Adu_view), B_view)
     end
     return u_half
 end
 
-"""
-ADI y-direction sweep - optimized
-"""
 function y_direction_sweep!(u, u_half, αx, αy, βx, βy, dt, ∇μX, ∇μY, ∇2μX, ∇2μY, D, kbT, temp_arrays)
     nx, ny = size(u_half)
     
@@ -360,15 +315,11 @@ function y_direction_sweep!(u, u_half, αx, αy, βx, βy, dt, ∇μX, ∇μY, �
             end
         end
         
-        # Solve and store result
         ldiv!(view(u, :, j), Tridiagonal(Adl_view, Au_view, Adu_view), B_view)
     end
     return u
 end
 
-"""
-Direct ADI scheme - optimized version
-"""
 function adi_scheme!(u, dt::Float64, dx::Float64, num_steps, μ, ∇μX, ∇μY, ∇2μX, ∇2μY, D, kbT, temp_arrays)
     # Pre-compute coefficients
     αx = D*dt/(2*dx^2)
@@ -388,9 +339,6 @@ function adi_scheme!(u, dt::Float64, dx::Float64, num_steps, μ, ∇μX, ∇μY,
     return u
 end
 
-"""
-Finite difference scheme - optimized version
-"""
 function fd!(u, dt::Float64, dx::Float64, num_steps, μ, ∇μX, ∇μY, ∇2μX, ∇2μY, D, kbT, u_new)
     nx, ny = size(u)
     alphax = D*dt/(dx^2)
@@ -399,7 +347,6 @@ function fd!(u, dt::Float64, dx::Float64, num_steps, μ, ∇μX, ∇μY, ∇2μX
     betay = D*dt/(2*kbT*dx)
     
     for step in 1:num_steps
-        # Interior points - vectorized where possible
         @inbounds for i in 2:nx-1, j in 2:ny-1
             u_new[i,j] = u[i,j] + (
                 alphax * (u[i-1,j] - 2 * u[i,j] + u[i+1,j]) +
@@ -423,15 +370,11 @@ function fd!(u, dt::Float64, dx::Float64, num_steps, μ, ∇μX, ∇μY, ∇2μX
             u_new[nx,j] = u[nx,j] + alphax * (2 * u[nx-1,j] - 2 * u[nx,j])
         end
         
-        # Swap arrays instead of copying
         u, u_new = u_new, u
     end
     return u
 end
 
-"""
-Public API functions that handle temporary array allocation
-"""
 function lie_splitting(dt::Float64, dx, u0, num_steps, μ, ∇μX, ∇μY, ∇2μX, ∇2μY, D, kbT)
     nx, ny = size(u0)
     temp_arrays = TempArrays2D(eltype(u0), nx, ny)
