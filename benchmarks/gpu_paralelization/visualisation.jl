@@ -11,7 +11,7 @@ p1 = plot(xlabel="Time Steps", ylabel="Execution Time (s)",
 
 # Get unique grid sizes and create a color palette
 grid_sizes = sort(unique(df.N))
-colors = palette(:tab10, length(grid_sizes))
+colors = palette(:Set1_5, length(grid_sizes))
 
 # Plot CPU (solid lines) and GPU (dashed lines) for each grid size
 for (i, n) in enumerate(grid_sizes)

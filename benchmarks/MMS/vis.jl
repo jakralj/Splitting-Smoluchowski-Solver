@@ -1,12 +1,29 @@
-using CSV, DataFrames, Plots, LaTeXStrings
+using CSV, DataFrames, Plots, LaTeXStrings, Printf
+
+# Helper function to format numbers into LaTeX scientific notation
+function format_scientific_latex(value)
+    # Format to scientific notation with 3 decimal places (e.g., "1.234e-05")
+    s = @sprintf("%.3e", value)
+    
+    # Split the string at 'e' or 'E'
+    parts = split(s, 'e')
+    mantissa = parts[1]
+    exponent_str = parts[2]
+    
+    # Remove leading plus sign for exponent if present, and handle leading zeros for a cleaner look in LaTeX.
+    # parse(Int, exponent_str) will correctly handle "05" as 5 and "-05" as -5.
+    exponent = parse(Int, exponent_str)
+
+    # Construct the LaTeX string
+    return "\$$(mantissa) \\times 10^{$(exponent)}\$"
+end
 
 # Read the data
-data = CSV.read("mms2_t_ex.tsv", DataFrame, delim='\t')
+data = CSV.read("mms1_t_ex.tsv", DataFrame, delim='\t')
 
 # Get unique values for axes
 dx_values = sort(unique(data.dx))
 dt_values = sort(unique(data.dt))  # Keep in ascending order for heatmap
-dt_values_display = reverse(dt_values)  # Reversed order for display (smaller dt on right)
 methods = unique(data.method)
 
 println("Methods found: ", methods)
@@ -30,7 +47,7 @@ function create_heatmap(method_data, method_name)
     # Create heatmap with log2 scales and flipped x-axis
     p = heatmap(
         dt_values, dx_values, error_matrix,
-        title="\$L^2\$ error heatmap - $(method_name) - Solution 2",
+        title="L2 error heatmap - $(method_name) - Solution 1",
         xlabel="dt",
         ylabel="dx",
         color=:magma,
@@ -84,18 +101,18 @@ function generate_latex_table(method_data, method_name)
     # Header row
     header = "dx/dt"
     for dt_val in dt_unique
-        header *= " & $dt_val"
+        header *= " & $(format_scientific_latex(dt_val))" # Use the new formatting function
     end
     header *= " \\\\ \\hline"
     println(header)
     
     # Data rows
     for dx_val in dx_unique
-        row_data = "$dx_val"
+        row_data = "$(format_scientific_latex(dx_val))" # Use the new formatting function
         for dt_val in dt_unique
             error_val = method_data[(method_data.dx .== dx_val) .& (method_data.dt .== dt_val), :error]
             if !isempty(error_val)
-                row_data *= " & " * string(round(error_val[1], sigdigits=6))
+                row_data *= " & $(format_scientific_latex(error_val[1]))" # Use the new formatting function
             else
                 row_data *= " & -"
             end

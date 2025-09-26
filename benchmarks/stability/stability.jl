@@ -102,21 +102,17 @@ function generate_u0(nx, sigma)
 end
 
 function run_benchmark()
-    # Simulation parameters - test multiple time steps
-    dt_values = [1/25, 1/50, 1/100, 1/200, 1/400]  # Different time steps
-    final_time = 10.0  # Fixed final time
+    dt_values = [1/25, 1/50, 1/100, 1/200, 1/400]  
+    final_time = 10.0
     
-    # Initial condition
     u0 = generate_u0(nx, 1.0)
     
-    # Store all potentials data
     potentials = [
         (μ1, ∇μX1, ∇μY1, ∇2μX1, ∇2μY1, "Potential 1"),
         (μ2, ∇μX2, ∇μY2, ∇2μX2, ∇2μY2, "Potential 2"),
         (μ3, ∇μX3, ∇μY3, ∇2μX3, ∇2μY3, "Potential 3")
     ]
     
-    # Store all results
     results = Dict()
     
     println("Running benchmarks with multiple time steps...")
@@ -144,27 +140,6 @@ function run_benchmark()
                 num_steps = num_steps
             )
             
-            # Check for instability signs
-            if any(isnan.(h_lie)) || any(isinf.(h_lie))
-                println("    WARNING: Lie splitting shows NaN/Inf!")
-            end
-            if any(isnan.(h_strang)) || any(isinf.(h_strang))
-                println("    WARNING: Strang splitting shows NaN/Inf!")
-            end
-            if any(isnan.(h_adi)) || any(isinf.(h_adi))
-                println("    WARNING: ADI shows NaN/Inf!")
-            end
-            
-            # Check for non-monotonic behavior (instability sign)
-            if any(diff(h_lie) .< -1e-10)
-                println("    WARNING: Lie splitting non-monotonic!")
-            end
-            if any(diff(h_strang) .< -1e-10)
-                println("    WARNING: Strang splitting non-monotonic!")
-            end
-            if any(diff(h_adi) .< -1e-10)
-                println("    WARNING: ADI non-monotonic!")
-            end
         end
         println()
     end
@@ -239,76 +214,6 @@ function create_plots(results)
     return dt_comparison_plots, stability_plots
 end
 
-function save_results_to_csv(results)
-    # Create DataFrame with all results
-    all_data = DataFrame()
-    
-    for (pot_name, data) in results
-        pot_df = DataFrame(
-            Time = data.time,
-            Potential = fill(pot_name, length(data.time)),
-            Lie_Splitting = data.lie,
-            Strang_Splitting = data.strang,
-            ADI = data.adi
-        )
-        all_data = vcat(all_data, pot_df)
-    end
-    
-    CSV.write("benchmark_results.csv", all_data)
-    println("Results saved to benchmark_results.csv")
-end
-
-function save_results_to_csv(results)
-    # Create DataFrame with all results
-    all_data = DataFrame()
-    
-    for (pot_name, pot_data) in results
-        for (dt, data) in pot_data
-            pot_df = DataFrame(
-                Time = data.time,
-                Potential = fill(pot_name, length(data.time)),
-                TimeStep = fill(dt, length(data.time)),
-                Lie_Splitting = data.lie,
-                Strang_Splitting = data.strang,
-                ADI = data.adi
-            )
-            all_data = vcat(all_data, pot_df)
-        end
-    end
-    
-    CSV.write("benchmark_results.csv", all_data)
-    println("Results saved to benchmark_results.csv")
-    
-    # Also save summary statistics
-    summary_data = DataFrame()
-    for (pot_name, pot_data) in results
-        for (dt, data) in pot_data
-            methods = [("Lie", data.lie), ("Strang", data.strang), ("ADI", data.adi)]
-            
-            for (method_name, h_values) in methods
-                is_monotonic = all(diff(h_values) .>= -1e-10)
-                has_nan_inf = any(isnan.(h_values)) || any(isinf.(h_values))
-                is_stable = is_monotonic && !has_nan_inf
-                
-                summary_row = DataFrame(
-                    Potential = pot_name,
-                    TimeStep = dt,
-                    Method = method_name,
-                    Initial_F = h_values[1],
-                    Final_F = h_values[end],
-                    Total_Decay = h_values[1] - h_values[end],
-                    Is_Monotonic = is_monotonic,
-                    Is_Stable = is_stable
-                )
-                summary_data = vcat(summary_data, summary_row)
-            end
-        end
-    end
-    
-    CSV.write("stability_summary.csv", summary_data)
-    println("Stability summary saved to stability_summary.csv")
-end
-
 # Main execution
 println("Starting comprehensive benchmark with multiple time steps...")
 results = run_benchmark()
@@ -329,6 +234,4 @@ savefig(stability_plots[1], "p4.pdf")
 savefig(stability_plots[2], "p5.pdf")
 savefig(stability_plots[3], "p6.pdf")
 # Save results
-save_results_to_csv(results)
-
 println("\nBenchmark completed!")
