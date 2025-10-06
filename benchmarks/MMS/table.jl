@@ -20,7 +20,7 @@ function format_powerof2_latex(value)
 end
 
 # Read the data
-data = CSV.read("mms2_t_ex.tsv", DataFrame, delim='\t')
+data = CSV.read("mms2_t_ex.tsv", DataFrame, delim = '\t')
 
 # Get unique values for axes
 dx_values = sort(unique(data.dx))
@@ -37,18 +37,18 @@ function generate_latex_table(method_data, method_name)
     println("\n" * "="^60)
     println("LaTeX table for method: $method_name (dt as rows, dx as columns)")
     println("="^60)
-    
+
     # dt values will be row headers, dx values will be column headers
-    dt_unique = sort(unique(method_data.dt), rev=true) # Reverse for typical display (smaller dt at the bottom)
+    dt_unique = sort(unique(method_data.dt), rev = true) # Reverse for typical display (smaller dt at the bottom)
     dx_unique = sort(unique(method_data.dx))
-    
+
     # Print LaTeX table header
     println("\\begin{table}[h!]")
     println("\\centering")
     println("\\caption{Error values for method: $method_name}")
     println("\\begin{tabular}{|c|" * "c|"^length(dx_unique) * "}") # Number of 'c|' based on dx_unique
     println("\\hline")
-    
+
     # Header row for dx values
     header = "dt/dx" # Changed to reflect the new layout
     for dx_val in dx_unique
@@ -56,13 +56,16 @@ function generate_latex_table(method_data, method_name)
     end
     header *= " \\\\ \\hline"
     println(header)
-    
+
     # Data rows
     for dt_val in dt_unique
         row_data = "$(format_powerof2_latex(dt_val))" # Use new formatting function for dt row headers
         for dx_val in dx_unique
             # Access data by swapping dx and dt roles
-            error_val = method_data[(method_data.dt .== dt_val) .& (method_data.dx .== dx_val), :error]
+            error_val = method_data[
+                (method_data.dt .== dt_val) .& (method_data.dx .== dx_val),
+                :error,
+            ]
             if !isempty(error_val)
                 row_data *= " & $(format_scientific_latex(error_val[1]))" # Error values still use scientific notation
             else
@@ -72,7 +75,7 @@ function generate_latex_table(method_data, method_name)
         row_data *= " \\\\ \\hline"
         println(row_data)
     end
-    
+
     println("\\end{tabular}")
     println("\\end{table}")
     println()
